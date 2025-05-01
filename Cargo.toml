@@ -1,0 +1,19 @@
+[package]
+name = "thanatos"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+colog = "1"
+log = "0.4"
+
+image = { version = "0.25", default-features = false, features = ["png"] }
+#clap = "4"
+#indicatif = { version = "0.17", features = ["rayon"] }
+#rayon = "1"
+#stacker = "0.1"
+thiserror = "2.0.12"
+crc32fast = "1.4.2"
+
+[dev-dependencies]
+anyhow = "1.0.98"

@@ -1,0 +1,35 @@
+vram sprite addr: 	0x5400
+
+dma src:	0x7f5e01
+0x7f4A00 seems to be dma buffer start 
+
+
+decompression fn start: 0x80a116 (?)
+decompression fn args:
+$7c - src address  -> Y
+
+$7f - dest address -> X
+$81 - dest bank    -> DB
+
+decompression fn vars:
+DB+X - dest
+Y    - src (in rom)
+$85  - count?
+$81  - ?
+
+decompression runs:
+Y(rom src)	DB X (dest)	notes
+8000		7F 4A00		loads blocks, difficulty, score indicator
+9C41		7F 4A00		loads combo indicator, countdown, pause menu
+A95D		7E 9394		loads intermediate (?) palettes
+A915		7F 4A00		loads background tiles & player sprite
+CA9E		7F 4A00		loads bunny sprite tiles
+DD27		7F 4A00		
+DD7B		7F 4A00
+DDBB		7F 4A00
+E04B		7F 4A00
+D556		7F 4A00
+D584		7F 4A00
+DB69		7E 5C3D		loads other intermediate palettes
+C2E5		7F 4A00
+0009		7F 4A00 	happens after ingame countdown
