@@ -1,3 +1,4 @@
+use crate::Compressable;
 use image::Rgb;
 
 #[derive(Debug, Clone)]
@@ -24,20 +25,24 @@ impl ColorIndex {
 }
 
 impl PaletteCollection {
-    /// Convert a slice of bytes into a collection of SNES palettes.
-    pub fn from_slice(data: &[u8]) -> Self {
-        assert!(data.len() == 512, "Palette data must be 512 bytes long");
+    pub const fn get(&self, index: usize) -> &Palette {
+        &self.0[index]
+    }
+}
 
-        let palette = data
+impl Compressable for PaletteCollection {
+    /// Convert a slice of bytes into a collection of SNES palettes.
+    fn try_from_slice(data: &[u8]) -> Option<Self> {
+        if data.len() != 512 {
+            return None;
+        }
+
+        let palettes = data
             .chunks_exact(32)
             .map(|palette_data| Palette::from_slice(palette_data))
             .collect::<Vec<_>>();
 
-        PaletteCollection(palette.try_into().unwrap())
-    }
-
-    pub const fn get(&self, index: usize) -> &Palette {
-        &self.0[index]
+        Some(PaletteCollection(palettes.try_into().unwrap()))
     }
 }
 

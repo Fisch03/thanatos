@@ -1,4 +1,4 @@
-use crate::palette::ColorIndex;
+use crate::{palette::ColorIndex, Compressable};
 
 use super::Palette;
 use image::{Rgba, RgbaImage};
@@ -6,23 +6,20 @@ use image::{Rgba, RgbaImage};
 //pdp uses 4bpp tiles
 const PLANE_CNT: usize = 4;
 
+#[derive(Debug, Clone)]
+pub struct Sprite {
+    pub size: (u32, u32),
+    pub tiles: Vec<(Tile, Palette)>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Tile([ColorIndex; 64]);
 
 pub struct TileSet(Vec<Tile>);
 
 impl TileSet {
-    pub fn from_slice(data: &[u8]) -> Self {
-        assert!(
-            data.len() % 32 == 0,
-            "Tile data must be a multiple of 32 bytes"
-        );
-
-        let tiles = data
-            .chunks_exact(32)
-            .map(|tile_data| Tile::from_slice(tile_data))
-            .collect::<Vec<_>>();
-
-        TileSet(tiles)
+    pub fn get(&self, index: usize) -> Option<&Tile> {
+        self.0.get(index)
     }
 
     pub fn remove(&mut self, index: usize) -> Tile {
@@ -32,6 +29,21 @@ impl TileSet {
 
     pub fn tiles(&self) -> &[Tile] {
         &self.0
+    }
+}
+
+impl Compressable for TileSet {
+    fn try_from_slice(data: &[u8]) -> Option<Self> {
+        if data.len() % 32 != 0 {
+            return None;
+        }
+
+        let tiles = data
+            .chunks_exact(32)
+            .map(|tile_data| Tile::from_slice(tile_data))
+            .collect::<Vec<_>>();
+
+        Some(TileSet(tiles))
     }
 }
 
@@ -81,5 +93,31 @@ impl Tile {
                 Rgba([color[0], color[1], color[2], 255])
             }
         })
+    }
+}
+
+impl Sprite {
+    pub fn new(size: (u32, u32), tiles: Vec<(Tile, Palette)>) -> Self {
+        assert!(
+            size.0 * size.1 == tiles.len() as u32,
+            "Size does not match tile count"
+        );
+
+        Sprite { size, tiles }
+    }
+
+    pub fn to_image(&self) -> RgbaImage {
+        use image::GenericImage;
+
+        let mut image = RgbaImage::new(self.size.0 * 8, self.size.1 * 8);
+
+        for (i, (tile, palette)) in self.tiles.iter().enumerate() {
+            let x = (i as u32 % self.size.0) * 8;
+            let y = (i as u32 / self.size.0) * 8;
+            let tile_image = tile.with_palette(palette);
+            image.copy_from(&tile_image, x, y).unwrap();
+        }
+
+        image
     }
 }

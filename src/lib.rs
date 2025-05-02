@@ -1,5 +1,5 @@
 mod compression;
-pub use compression::Decompressor;
+pub use compression::{Compressable, DecompressError, Decompressor};
 
 mod palette;
 pub use palette::{ColorIndex, Palette, PaletteCollection};
@@ -7,4 +7,4 @@ mod tile;
 pub use tile::{Tile, TileSet};
 
 mod rom;
-pub use rom::{Rom, RomError, RomVersion};
+pub use rom::{MappedRom, RomLoadError};

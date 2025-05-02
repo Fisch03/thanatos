@@ -28,6 +28,8 @@ pub enum DecompressError {
     LoopDetected,
     #[error("Maximum size exceeded")]
     MaxSizeExceeded,
+    #[error("Invalid Data")]
+    InvalidData,
 }
 
 impl Operation {

@@ -1,5 +1,19 @@
 mod decompress;
-pub use decompress::Decompressor;
+pub use decompress::{DecompressError, Decompressor};
+
+pub trait Compressable {
+    fn from_compressed(data: &[u8], offset: usize) -> Result<Self, DecompressError>
+    where
+        Self: Sized,
+    {
+        let decompressed = Decompressor::new(data, offset).decompress()?;
+        Self::try_from_slice(&decompressed).ok_or(DecompressError::InvalidData)
+    }
+
+    fn try_from_slice(data: &[u8]) -> Option<Self>
+    where
+        Self: Sized;
+}
 
 #[derive(Debug)]
 enum NibblePos {
