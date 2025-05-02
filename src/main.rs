@@ -1,11 +1,85 @@
-use thanatos::Rom;
+use indicatif::ParallelProgressIterator;
+use rayon::prelude::*;
+
+use std::fs;
+use thanatos::{Decompressor, PaletteCollection, Rom, TileSet};
 
 fn main() {
     colog::init();
 
     let rom = Rom::open("panepon.sfc").expect("Failed to open ROM file");
 
-    dbg!(rom.version());
+    let test_palette = {
+        let data = Decompressor::new(&rom.data(), 0x6295d)
+            .decompress()
+            .expect("Failed to decompress palette");
+
+        PaletteCollection::from_slice(&data)
+    };
+
+    let _ = fs::remove_dir_all("test");
+    fs::create_dir("test").expect("Failed to create directory");
+
+    log::info!("Scanning for tiles...");
+    let rom_len = rom.data().len();
+    (0..rom_len).into_par_iter().progress().for_each(|offset| {
+        let mut tiles = {
+            let result = Decompressor::new(&rom.data(), offset).decompress();
+
+            let data = match result {
+                Ok(data) => data,
+                Err(_) => {
+                    return;
+                }
+            };
+
+            if data.len() == 0 || data.len() % 32 != 0 {
+                return;
+            }
+
+            TileSet::from_slice(&data)
+        };
+
+        if tiles.tiles().len() < 64 {
+            return;
+        }
+
+        for i in (0..tiles.tiles().len()).rev() {
+            let mut used_colors = [false; 16];
+            for j in 0..64 {
+                let color = tiles.tiles()[i].data()[j];
+                if !color.is_transparent() {
+                    used_colors[color.as_u8() as usize] = true;
+                }
+            }
+
+            let color_count = used_colors.iter().filter(|&&c| c).count();
+            if color_count < 2 {
+                tiles.remove(i);
+            }
+        }
+
+        if tiles.tiles().len() < 64 {
+            return;
+        }
+
+        let folder_name = &format!("test/tiles_{:#08x}", offset);
+        fs::create_dir(folder_name).expect("Failed to create directory");
+        tiles.tiles().par_iter().enumerate().for_each(|(i, tile)| {
+            let img = tile.with_palette(test_palette.get(10));
+
+            const SCALE: u32 = 10;
+            let img = image::imageops::resize(
+                &img,
+                8 * SCALE,
+                8 * SCALE,
+                image::imageops::FilterType::Nearest,
+            );
+
+            img.save(format!("{}/tile_{:04}.png", folder_name, i))
+                .expect("Failed to save tile image");
+        });
+    });
 
     /*
     let rom = fs::read("panepon.sfc").expect("Failed to read ROM file");

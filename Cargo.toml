@@ -9,11 +9,13 @@ log = "0.4"
 
 image = { version = "0.25", default-features = false, features = ["png"] }
 #clap = "4"
-#indicatif = { version = "0.17", features = ["rayon"] }
-#rayon = "1"
+indicatif = { version = "0.17", features = ["rayon"] }
+rayon = "1"
 #stacker = "0.1"
-thiserror = "2.0.12"
-crc32fast = "1.4.2"
+thiserror = "2"
+crc32fast = "1"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-anyhow = "1.0.98"
+anyhow = "1"

@@ -1,3 +1,5 @@
 /target
 /tile_export
 **/*.sfc
+/test
+/good_tiles

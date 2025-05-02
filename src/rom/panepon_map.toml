@@ -1,0 +1,57 @@
+[rom]
+name = "Panel de Pon (Japan)"
+crc = 0x14D70786
+
+[[palette]]
+name = "panel"
+region = 0x6295d
+index = 10
+
+[[palette]]
+name = "panel-special"
+region = 0x6295d
+index = 11
+
+[[sprite]]
+category = "panel"
+name = "normal"
+size = [12, 2]
+region = 0x60000
+layout = [
+    { start = 139, count = 2, repeat = 6, gap = 2 },
+    { start = 141, count = 2, repeat = 6, gap = 2 },
+]
+palette = [
+    "panel",
+    { start = [10, 0], size = [2, 2], palette = "panel-special" },
+]
+
+[[sprite]]
+category = "panel"
+name = "dead"
+size = [12, 2]
+region = 0x60000
+layout = [
+    { start = 169, count = 12 }, 
+    { start = 185, count = 12 }
+]
+palette = [
+    "panel",
+    { start = [10, 0], size = [2, 2], palette = "panel-special" },
+]
+
+[[sprite]]
+category = "panel"
+name = "flashing"
+region = 0x60000
+size = [12, 2]
+layout = [
+    { start = 181, count = 4 },
+    { start = 201, count = 8 },
+    { start = 197, count = 4 },
+    { start = 217, count = 8 },
+]
+palette = [
+    "panel",
+    { start = [10, 0], size = [2, 2], palette = "panel-special" },
+]

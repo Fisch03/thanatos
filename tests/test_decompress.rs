@@ -19,7 +19,7 @@ fn test_decompress() -> anyhow::Result<()> {
             usize::from_str_radix(offset, 16).expect("Failed to parse offset from filename");
 
         let expected = fs::read(entry.path())?;
-        let result = thanatos::Decompressor::new(&rom, offset).decompress();
+        let result = thanatos::Decompressor::new(&rom, offset).decompress()?;
 
         if expected != result {
             panic!(
