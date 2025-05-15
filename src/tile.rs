@@ -1,4 +1,4 @@
-use crate::{palette::ColorIndex, Compressable};
+use crate::{palette::ColorIndex, Compressable, DecompressError, PaletteIndex};
 
 use super::Palette;
 use image::{Rgba, RgbaImage};
@@ -6,44 +6,140 @@ use image::{Rgba, RgbaImage};
 //pdp uses 4bpp tiles
 const PLANE_CNT: usize = 4;
 
-#[derive(Debug, Clone)]
-pub struct Sprite {
-    pub size: (u32, u32),
-    pub tiles: Vec<(Tile, Palette)>,
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Tile([ColorIndex; 64]);
 
-pub struct TileSet(Vec<Tile>);
+#[derive(Debug, Clone)]
+pub struct TileSet(Box<[Tile; 1024]>);
+
+#[derive(Debug, Clone)]
+pub struct PartialTileSet(Vec<Tile>);
+
+#[derive(Debug, Clone)]
+pub struct TileMap(Vec<TileMapEntry>);
+
+#[derive(Debug, Clone)]
+pub struct TileMapEntry(u16);
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TileSettings {
+    pub x_flip: bool,
+    pub y_flip: bool,
+    pub priority: u8,
+}
 
 impl TileSet {
-    pub fn get(&self, index: usize) -> Option<&Tile> {
-        self.0.get(index)
+    pub fn new() -> Self {
+        TileSet(Box::new([Tile([ColorIndex::new(0); 64]); 1024]))
     }
 
-    pub fn remove(&mut self, index: usize) -> Tile {
-        assert!(index < self.0.len(), "Index out of bounds");
-        self.0.remove(index)
+    pub fn add_tile_data(&mut self, offset: usize, tiles: PartialTileSet) {
+        if offset + tiles.0.len() > self.0.len() {
+            panic!("TileSet overflow");
+        }
+
+        for i in offset..offset + tiles.0.len() {
+            self.0[i] = tiles.0[i - offset];
+        }
     }
 
     pub fn tiles(&self) -> &[Tile] {
-        &self.0
+        self.0.as_ref()
     }
 }
 
-impl Compressable for TileSet {
-    fn try_from_slice(data: &[u8]) -> Option<Self> {
+impl PartialTileSet {
+    pub fn tiles(&self) -> &[Tile] {
+        &self.0
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl Compressable for PartialTileSet {
+    fn try_from_slice(data: &[u8]) -> Result<Self, DecompressError> {
         if data.len() % 32 != 0 {
-            return None;
+            return Err(DecompressError::InvalidLayout(
+                "Tile data must be a multiple of 32 bytes".to_string(),
+            ));
         }
 
         let tiles = data
             .chunks_exact(32)
-            .map(|tile_data| Tile::from_slice(tile_data))
+            .map(Tile::from_slice)
             .collect::<Vec<_>>();
 
-        Some(TileSet(tiles))
+        Ok(PartialTileSet(tiles))
+    }
+}
+
+impl std::ops::Index<usize> for TileSet {
+    type Output = Tile;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl TileMap {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl std::ops::Index<usize> for TileMap {
+    type Output = TileMapEntry;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl Compressable for TileMap {
+    fn try_from_slice(data: &[u8]) -> Result<Self, DecompressError> {
+        if data.len() % 2 != 0 {
+            return Err(DecompressError::InvalidLayout(
+                "TileMap data must be a multiple of 2 bytes".to_string(),
+            ));
+        }
+
+        let tile_map = data
+            .chunks_exact(2)
+            .map(|chunk| {
+                let data = u16::from_le_bytes([chunk[0], chunk[1]]);
+                TileMapEntry(data)
+            })
+            .collect::<Vec<_>>();
+
+        Ok(TileMap(tile_map))
+    }
+}
+
+impl TileMapEntry {
+    pub fn tile_index(&self) -> usize {
+        (self.0 & 0x3FF) as usize
+    }
+
+    pub fn palette_index(&self) -> PaletteIndex {
+        PaletteIndex::new(((self.0 >> 10) & 0x7) as usize)
+    }
+
+    pub fn tile_settings(&self) -> TileSettings {
+        let priority = ((self.0 >> 13) & 0x3) as u8;
+        let y_flip = ((self.0 >> 15) & 0x1) != 0;
+        let x_flip = ((self.0 >> 14) & 0x1) != 0;
+
+        TileSettings {
+            x_flip,
+            y_flip,
+            priority,
+        }
+    }
+
+    pub fn as_u16(&self) -> u16 {
+        self.0
     }
 }
 
@@ -74,50 +170,27 @@ impl Tile {
                     color |= (bit << plane) as u8;
                 }
 
-                tile[row * 8 + col] = ColorIndex::new(color);
+                tile[row * 8 + col] = ColorIndex::new(color as usize);
             }
         }
 
         Tile(tile)
     }
 
-    pub fn with_palette(&self, palette: &Palette) -> RgbaImage {
+    pub fn with_palette(&self, palette: &Palette, settings: TileSettings) -> RgbaImage {
         RgbaImage::from_fn(8, 8, |x, y| {
+            let x = if settings.x_flip { 7 - x } else { x };
+            let y = if settings.y_flip { 7 - y } else { y };
+
             let pixel_index = ((y * 8) + x) as usize;
             let color_index = self.0[pixel_index];
 
             if color_index.is_transparent() {
                 Rgba([0, 0, 0, 0])
             } else {
-                let color = palette.get(color_index);
+                let color = palette[color_index];
                 Rgba([color[0], color[1], color[2], 255])
             }
         })
-    }
-}
-
-impl Sprite {
-    pub fn new(size: (u32, u32), tiles: Vec<(Tile, Palette)>) -> Self {
-        assert!(
-            size.0 * size.1 == tiles.len() as u32,
-            "Size does not match tile count"
-        );
-
-        Sprite { size, tiles }
-    }
-
-    pub fn to_image(&self) -> RgbaImage {
-        use image::GenericImage;
-
-        let mut image = RgbaImage::new(self.size.0 * 8, self.size.1 * 8);
-
-        for (i, (tile, palette)) in self.tiles.iter().enumerate() {
-            let x = (i as u32 % self.size.0) * 8;
-            let y = (i as u32 / self.size.0) * 8;
-            let tile_image = tile.with_palette(palette);
-            image.copy_from(&tile_image, x, y).unwrap();
-        }
-
-        image
     }
 }

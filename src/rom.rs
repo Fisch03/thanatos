@@ -1,22 +1,32 @@
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, fs, path::Path, sync::Arc};
 use thiserror::Error;
 
-use crate::{tile::Sprite, Compressable, DecompressError, Palette, PaletteCollection, TileSet};
+use crate::{
+    tile::PartialTileSet, Compressable, DecompressError, Decompressor, PaletteCollection, Sprite,
+    TileMap, TileSet,
+};
 
 mod map;
-use map::{RomMap, RomMetadata};
+pub use map::RomMap;
+use map::RomMetadata;
+
+#[derive(Debug, Clone)]
+pub struct Rom<'rom> {
+    data: Cow<'rom, [u8]>,
+    crc: u32,
+}
 
 #[derive(Debug, Clone)]
 pub struct MappedRom {
     pub metadata: RomMetadata,
-    pub palettes: Vec<Arc<MappedPalette>>,
+    pub palettes: Vec<MappedPaletteCollection>,
     pub sprites: Vec<MappedSprite>,
 }
 
 #[derive(Debug, Clone)]
-pub struct MappedPalette {
+pub struct MappedPaletteCollection {
     pub name: String,
-    pub palette: Palette,
+    pub palettes: Arc<PaletteCollection>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,139 +37,139 @@ pub struct MappedSprite {
 }
 
 #[derive(Error, Debug)]
-pub enum RomLoadError {
+pub enum RomError {
     #[error("Failed to read ROM file")]
     Read(#[from] std::io::Error),
     #[error("Failed to decompress data")]
     Decompress(#[from] DecompressError),
-    #[error("No compatible data map found for the ROM")]
+    #[error("Incompatible ROM map")]
     IncompatibleMap,
-    #[error("Sprite definition for {0} produced sprite with invalid size")]
-    InvalidSpriteSize(String),
-    #[error("Sprite definition for {0} tried to access out of bounds tile")]
-    OutOfBoundsTile(String),
-    #[error("Sprite definition for {0} references unknown palette {1}")]
+
+    #[error("Invalid palette definition for '{0}', first region cannot have a start offset")]
+    InvalidPaletteDefinition(String),
+
+    #[error("Sprite definition for '{0}' references unknown palette '{1}'")]
     UnknownPalette(String, String),
+    #[error("Sprite definition for '{0}' references unknown tileset '{1}'")]
+    UnknownTileset(String, String),
+}
+
+impl<'rom> Rom<'rom> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, RomError> {
+        let rom = fs::read(path.as_ref())?;
+        let crc = crc32fast::hash(&rom);
+        let data = Cow::Owned(rom);
+        Ok(Self { data, crc })
+    }
+
+    pub fn new(data: &'rom [u8]) -> Self {
+        let crc = crc32fast::hash(data);
+        let data = Cow::Borrowed(data);
+        Self { data, crc }
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn crc(&self) -> u32 {
+        self.crc
+    }
 }
 
 impl MappedRom {
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, RomLoadError> {
-        let rom = fs::read(path.as_ref())?;
-        let map = RomMap::find_for_rom(&rom, &[]).ok_or(RomLoadError::IncompatibleMap)?;
-        Self::new(&rom, map)
+    pub fn new(rom: &Rom, map: &RomMap) -> Result<Self, RomError> {
+        if let Some(metadata) = map.get_compatible_metadata(rom) {
+            let metadata = metadata.clone();
+            Self::new_inner(&rom.data, map, metadata)
+        } else {
+            Err(RomError::IncompatibleMap)
+        }
     }
 
-    pub fn new(rom: &[u8], map: Arc<RomMap>) -> Result<Self, RomLoadError> {
-        let crc = crc32fast::hash(rom);
-        let metadata = map
-            .supported_roms
-            .iter()
-            .find(|rom_type| rom_type.crc == crc)
-            .ok_or(RomLoadError::IncompatibleMap)?
-            .clone();
+    pub fn new_forced(rom: &Rom, map: &RomMap) -> Result<Self, RomError> {
+        let metadata = RomMetadata {
+            name: "Unknown".to_string(),
+            crc: rom.crc(),
+        };
 
-        let palette_regions =
-            map.palettes
-                .iter()
-                .enumerate()
-                .fold(HashMap::new(), |mut acc, (index, palette)| {
-                    acc.entry(palette.region)
-                        .or_insert_with(Vec::new)
-                        .push(index);
-                    acc
-                });
+        Self::new_inner(&rom.data, map, metadata)
+    }
 
+    fn new_inner(rom: &[u8], map: &RomMap, metadata: RomMetadata) -> Result<Self, RomError> {
+        log::debug!("decompressing rom palette data...");
         let mut palettes = HashMap::new();
-        for (region, palette_indices) in palette_regions {
-            let palette_collection = PaletteCollection::from_compressed(rom, region)?;
+        for definition in map.palettes.iter() {
+            let first = definition
+                .layout
+                .first()
+                .map(|layout| layout.region)
+                .ok_or_else(|| RomError::InvalidPaletteDefinition(definition.name.clone()))?;
 
-            for index in palette_indices {
-                let palette_definition = &map.palettes[index];
-                let palette = palette_collection.get(palette_definition.index);
-                let mapped_palette = MappedPalette {
-                    name: palette_definition.name.clone(),
-                    palette: palette.clone(),
-                };
-                palettes.insert(palette_definition.name.clone(), Arc::new(mapped_palette));
+            let mut palette_collection = PaletteCollection::from_compressed(rom, first)?;
+            for layout in definition.layout.iter().skip(1) {
+                let result = Decompressor::new(rom, layout.region).decompress()?;
+
+                palette_collection.add_palette_data(layout.start, &result.data);
+            }
+
+            palettes.insert(
+                definition.name.clone(),
+                MappedPaletteCollection {
+                    name: definition.name.clone(),
+                    palettes: Arc::new(palette_collection),
+                },
+            );
+        }
+
+        log::debug!("decompressing rom tileset data...");
+        let mut tilesets = HashMap::new();
+        for definition in map.tilesets.iter() {
+            let mut tileset = TileSet::new();
+
+            for layout in definition.layout.iter() {
+                let partial_tile_set = PartialTileSet::from_compressed(rom, layout.region)?;
+                tileset.add_tile_data(layout.offset, partial_tile_set);
+            }
+
+            tilesets.insert(definition.name.clone(), Arc::new(tileset));
+        }
+
+        log::debug!("decompressing rom tilemap data...");
+        let mut layout_regions = HashMap::new();
+        for definition in map.sprites.iter() {
+            if !layout_regions.contains_key(&definition.layout_region) {
+                let layout = TileMap::from_compressed(rom, definition.layout_region)?;
+                layout_regions.insert(definition.layout_region, Arc::new(layout));
             }
         }
 
-        let sprite_regions =
-            map.sprites
-                .iter()
-                .enumerate()
-                .fold(HashMap::new(), |mut acc, (index, sprite)| {
-                    acc.entry(sprite.region)
-                        .or_insert_with(Vec::new)
-                        .push(index);
-
-                    acc
-                });
-
+        log::debug!("building sprites...");
         let mut sprites = Vec::new();
-        for (region, sprite_indices) in sprite_regions {
-            let tileset = TileSet::from_compressed(rom, region)?;
+        for sprite_def in map.sprites.iter() {
+            let palette = palettes.get(&sprite_def.palette).ok_or_else(|| {
+                RomError::UnknownPalette(sprite_def.name.clone(), sprite_def.palette.clone())
+            })?;
 
-            for index in sprite_indices {
-                let sprite_definition = &map.sprites[index];
-                let mut tiles = Vec::new();
+            let tileset = tilesets.get(&sprite_def.tileset).ok_or_else(|| {
+                RomError::UnknownTileset(sprite_def.name.clone(), sprite_def.tileset.clone())
+            })?;
 
-                let mut x = 0;
-                let mut y = 0;
-                for instruction in &sprite_definition.layout {
-                    let mut index = instruction.start;
-                    let count = instruction.count.unwrap_or(1);
-                    let repeat = instruction.repeat.unwrap_or(1);
-                    let gap = instruction.gap.unwrap_or(0);
+            let layout = layout_regions.get(&sprite_def.layout_region).unwrap();
 
-                    for _ in 0..repeat {
-                        for _ in 0..count {
-                            let tile = tileset
-                                .get(index)
-                                .ok_or(RomLoadError::OutOfBoundsTile(
-                                    sprite_definition.name.clone(),
-                                ))?
-                                .clone();
+            let sprite = Sprite::new(
+                (sprite_def.size.0, sprite_def.size.1),
+                tileset.clone(),
+                layout.clone(),
+                palette.palettes.clone(),
+            );
 
-                            let palette_name = sprite_definition.palette.get((x, y));
-                            let palette = palettes
-                                .get(palette_name)
-                                .ok_or(RomLoadError::UnknownPalette(
-                                    sprite_definition.name.clone(),
-                                    palette_name.to_string(),
-                                ))?
-                                .clone();
-
-                            tiles.push((tile, palette.palette.clone()));
-
-                            x += 1;
-                            if x >= sprite_definition.size.0 {
-                                x = 0;
-                                y += 1;
-                            }
-                            index += 1;
-                        }
-
-                        index += gap;
-                    }
-                }
-
-                if sprite_definition.size.0 * sprite_definition.size.1 != tiles.len() as u32 {
-                    return Err(RomLoadError::InvalidSpriteSize(
-                        sprite_definition.name.clone(),
-                    ));
-                }
-
-                let sprite =
-                    Sprite::new((sprite_definition.size.0, sprite_definition.size.1), tiles);
-
-                let mapped_sprite = MappedSprite {
-                    name: sprite_definition.name.clone(),
-                    category: sprite_definition.category.clone(),
-                    sprite,
-                };
-                sprites.push(mapped_sprite);
-            }
+            let mapped_sprite = MappedSprite {
+                name: sprite_def.name.clone(),
+                category: sprite_def.category.clone(),
+                sprite,
+            };
+            sprites.push(mapped_sprite);
         }
 
         let palettes = palettes

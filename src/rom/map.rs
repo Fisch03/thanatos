@@ -1,7 +1,5 @@
-use serde::{
-    de::{self, Visitor},
-    Deserialize,
-};
+use crate::Rom;
+use serde::Deserialize;
 use std::sync::{Arc, LazyLock};
 
 static INBUILT_MAPS: LazyLock<Vec<Arc<RomMap>>> = LazyLock::new(|| {
@@ -20,6 +18,8 @@ pub struct RomMap {
     pub palettes: Vec<PaletteDefinition>,
     #[serde(rename = "sprite")]
     pub sprites: Vec<SpriteDefinition>,
+    #[serde(rename = "tileset")]
+    pub tilesets: Vec<TileSetDefinition>,
 }
 
 impl RomMap {
@@ -27,19 +27,24 @@ impl RomMap {
         toml::de::from_str(map)
     }
 
-    pub fn find_for_rom<'rom>(
-        rom: &'rom [u8],
-        additional_maps: &[Arc<RomMap>],
-    ) -> Option<Arc<RomMap>> {
-        let crc = crc32fast::hash(rom);
+    pub fn is_compatible_with(&self, rom: &Rom) -> bool {
+        self.get_compatible_metadata(rom).is_some()
+    }
 
+    pub fn get_compatible_metadata(&self, rom: &Rom) -> Option<RomMetadata> {
+        self.supported_roms
+            .iter()
+            .find(|rom_type| rom_type.crc == rom.crc())
+            .cloned()
+    }
+
+    pub fn find_inbuilt_for<'rom>(rom: &Rom) -> Option<Arc<RomMap>> {
         INBUILT_MAPS
             .iter()
-            .chain(additional_maps.iter())
             .find(|map| {
                 map.supported_roms
                     .iter()
-                    .any(|rom_type| rom_type.crc == crc)
+                    .any(|rom_type| rom_type.crc == rom.crc())
             })
             .cloned()
     }
@@ -54,122 +59,39 @@ pub struct RomMetadata {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PaletteDefinition {
     pub name: String,
-    pub region: usize,
-    pub index: usize,
+    pub layout: Vec<PaletteLayout>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PaletteLayout {
-    pub default: String,
-    pub regions: Vec<PaletteRegion>,
-}
+    pub region: usize,
 
-impl PaletteLayout {
-    pub fn get(&self, pos: (u32, u32)) -> &str {
-        for region in &self.regions {
-            if pos.0 >= region.start.0
-                && pos.0 < region.start.0 + region.size.0
-                && pos.1 >= region.start.1
-                && pos.1 < region.start.1 + region.size.1
-            {
-                return &region.palette;
-            }
-        }
-
-        &self.default
-    }
+    #[serde(default)]
+    pub start: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct PaletteRegion {
-    pub palette: String,
-    pub start: (u32, u32),
-    pub size: (u32, u32),
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct SpriteDefinition {
     pub name: String,
-
     pub category: Option<String>,
+
     pub size: (u32, u32),
 
-    pub region: usize,
+    pub tileset: String,
+    pub palette: String,
 
-    pub layout: Vec<SpriteLayoutInstruction>,
-
-    pub palette: PaletteLayout,
+    pub layout_region: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SpriteLayoutInstruction {
-    pub start: usize,
-    #[serde(default)]
-    pub count: Option<usize>,
-
-    #[serde(default)]
-    pub repeat: Option<usize>,
-    #[serde(default)]
-    pub gap: Option<usize>,
+pub struct TileSetDefinition {
+    pub name: String,
+    pub layout: Vec<TileSetLayout>,
 }
 
-impl<'de> Deserialize<'de> for PaletteLayout {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(PaletteLayoutVisitor)
-    }
-}
-
-struct PaletteLayoutVisitor;
-
-impl<'de> Visitor<'de> for PaletteLayoutVisitor {
-    type Value = PaletteLayout;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a string or a map")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(PaletteLayout {
-            default: value.to_string(),
-            regions: Vec::new(),
-        })
-    }
-
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: de::SeqAccess<'de>,
-    {
-        let mut default = None;
-        let mut regions = Vec::new();
-
-        while let Some(elem) = seq.next_element::<toml::Value>()? {
-            match elem {
-                toml::Value::String(s) => {
-                    if default.is_none() {
-                        default = Some(s.to_string());
-                    } else {
-                        return Err(de::Error::custom("Multiple default palettes found"));
-                    }
-                }
-                toml::Value::Table(table) => {
-                    let region: PaletteRegion =
-                        toml::de::from_str(&table.to_string()).map_err(de::Error::custom)?;
-                    regions.push(region);
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(default) = default {
-            Ok(PaletteLayout { default, regions })
-        } else {
-            Err(de::Error::custom("No default palette found"))
-        }
-    }
+#[derive(Debug, Clone, Deserialize)]
+pub struct TileSetLayout {
+    pub region: usize,
+    pub offset: usize,
 }

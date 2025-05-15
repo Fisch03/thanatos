@@ -1,101 +1,202 @@
-supported_roms = [{ name = "Panel de Pon (Japan)", crc = 0x14D70786 }]
-
-[[palette]]
-name = "panel"
-region = 0x6295d
-index = 10
-
-[[palette]]
-name = "panel-special"
-region = 0x6295d
-index = 11
-
-[[palette]]
-name = "ui-cyan"
-region = 0x6295d
-index = 3
-
-[[palette]]
-name = "ui-pink"
-region = 0x6295d
-index = 4
-
-[[sprite]]
-name = "panel"
-size = [12, 12]
-region = 0x60000
-layout = [
-    # normal
-    { start = 160, count = 2, repeat = 6, gap = 2 },
-    { start = 162, count = 2, repeat = 6, gap = 2 },
-
-    # flashing
-    { start = 204, count = 4 },
-    { start = 224, count = 8 },
-    { start = 220, count = 4 },
-    { start = 240, count = 8 },
-
-    # squish
-    { start = 300, count = 4 },
-    { start = 320, count = 8 },
-    { start = 316, count = 4 },
-    { start = 336, count = 8 },
-
-    # stretch 1
-    { start = 260, count = 12, repeat = 2, gap = 4 },
-
-    # stretch 2
-    { start = 232, count = 8 },
-    { start = 256, count = 4 },
-    { start = 248, count = 8 },
-    { start = 272, count = 4 },
-
-    # dead
-    { start = 192, count = 12, repeat = 2, gap = 4 },
-]
-palette = [
-    "panel",
-    { start = [10, 0], size = [2, 12], palette = "panel-special" },
+supported_roms = [
+    { name = "Panel de Pon (Japan)", crc = 0x14D70786 },
+    { name = "Panel de Pon (World) (Ja) (Rev 1) (Virtual Console, Switch Online)", crc = 0xE3510CB3 },
 ]
 
-[[sprite]]
-category = "ui"
-name = "numbers-big"
-region = 0x60000
-size = [10, 2]
+[[palette]]
+name = "base"
 layout = [
-    { start = 16, count = 10 },
-    { start = 32, count = 10 },
+    { region = 0x6295d } # base
 ]
-palette = "ui-cyan"
+
+[[palette]]
+name = "main-2" #lip background?
+layout = [
+    { region = 0x6295d }, # base
+    { region = 0x8dd27, start = 5 }
+]
+
+[[tileset]]
+name = "singleplayer-lip"
+layout = [
+    { region = 0x8a915, offset = 512 },
+]
+
+# -- Characters --
 
 [[sprite]]
-category = "ui"
-name = "numbers-small"
-region = 0x60000
-size = [10, 1]
-layout = [
-    { start = 48, count = 10 },
-]
-palette = "ui-pink"
+name = "lip"
+category = "characters"
+size = [32, 32]
+tileset = "singleplayer-lip"
+palette = "main-2"
+layout-region = 0x8ddbb
 
-[[sprite]]
-category = "ui"
-name = "stop-clock"
-region = 0x60000
-size = [10, 4]
-layout = [
-    { start = 448, count = 10, repeat = 4, gap = 6 },
+# [[sprite]]
+# name = "panel"
+# size = [12, 12]
+# region = 0x60000
+# layout = [
+#     # normal
+#     { start = 160, count = 2, repeat = 6, gap = 2 },
+#     { start = 162, count = 2, repeat = 6, gap = 2 },
+
+#     # flashing
+#     { start = 204, count = 4 },
+#     { start = 224, count = 8 },
+#     { start = 220, count = 4 },
+#     { start = 240, count = 8 },
+
+#     # squish
+#     { start = 300, count = 4 },
+#     { start = 320, count = 8 },
+#     { start = 316, count = 4 },
+#     { start = 336, count = 8 },
+
+#     # stretch 1
+#     { start = 260, count = 12, repeat = 2, gap = 4 },
+
+#     # stretch 2
+#     { start = 232, count = 8 },
+#     { start = 256, count = 4 },
+#     { start = 248, count = 8 },
+#     { start = 272, count = 4 },
+
+#     # dead
+#     { start = 192, count = 12, repeat = 2, gap = 4 },
+# ]
+# palette = [
+#     "panel",
+#     { start = [10, 0], size = [2, 12], palette = "panel-special" },
+# ]
+
+# -- UI Sprites --
+
+# [[sprite]]
+# category = "ui"
+# name = "numbers-big"
+# region = 0x60000
+# size = [10, 2]
+# layout = [
+#     { start = 16, count = 10 },
+#     { start = 32, count = 10 },
+# ]
+# palette = "ui-cyan"
+
+# [[sprite]]
+# category = "ui"
+# name = "numbers-small"
+# region = 0x60000
+# size = [10, 1]
+# layout = [
+#     { start = 48, count = 10 },
+# ]
+# palette = "ui-pink"
+
+# [[sprite]]
+# category = "ui"
+# name = "label-time"
+# region = 0x60000
+# size = [4, 1]
+# layout = [
+#     { start = 26, count = 4 },
+# ]
+# palette = "ui-cyan"
+
+# [[sprite]]
+# category = "ui"
+# name = "label-high-score"
+# region = 0x60000
+# size = [5, 1]
+# layout = [
+#     { start = 75, count = 5 },
+# ]
+# palette = "ui-pink"
+
+# [[sprite]]
+# category = "ui"
+# name = "label-score"
+# region = 0x60000
+# size = [5, 1]
+# layout = [
+#     { start = 107, count = 5 },
+# ]
+# palette = "ui-cyan"
+
+# [[sprite]]
+# category = "ui"
+# name = "label-speed-lvl"
+# region = 0x60000
+# size = [6, 1]
+# layout = [
+#     { start = 356, count = 6 },
+# ]
+# palette = "ui-cyan"
+
+# [[sprite]]
+# category = "ui"
+# name = "label-difficulty"
+# region = 0x60000
+# size = [5, 1]
+# layout = [
+#     { start = 184, count = 5 },
+# ]
+# palette = "ui-cyan"
+
+# [[sprite]]
+# category = "ui"
+# name = "difficulty-easy"
+# region = 0x60000
+# size = [4, 2]
+# layout = [
+#     { start = 80, count = 4, repeat = 2, gap = 12 },
+# ]
+# palette = "ui-cyan"
+
+# [[sprite]]
+# category = "ui"
+# name = "difficulty-normal"
+# region = 0x60000
+# size = [6, 2]
+# layout = [
+#     { start =  84, count = 3 },
+#     { start = 73 },
+#     { start =  91, count = 2 },
+#     { start = 100, count = 3 },
+#     { start = 74 },
+#     { start =  94, count = 2 }, 
+# ]
+# palette = "ui-pink"
+
+# [[sprite]]
+# category = "ui"
+# name = "difficulty-hard"
+# region = 0x60000
+# size = [4, 2]
+# layout = [
+#     { start =  87, count = 4, repeat = 2, gap = 12 },
+# ]
+# palette = "ui-pink"
+
+# [[sprite]]
+# category = "ui"
+# name = "stop-clock"
+# region = 0x60000
+# size = [10, 4]
+# layout = [
+#     { start = 448, count = 10, repeat = 4, gap = 6 },
     
-]
-palette = "ui-cyan"
+# ]
+# palette = "ui-cyan"
 
-[[sprite]]
-category = "ui"
-name = "stop-clock-bubble"
-region = 0x60000
-size = [4, 2]
-layout = [
-    { start = 458, count = 4, repeat = 2, gap = 12 },
-]
-palette = "ui-cyan"
+# [[sprite]]
+# category = "ui"
+# name = "stop-clock-bubble"
+# region = 0x60000
+# size = [4, 2]
+# layout = [
+#     { start = 458, count = 4, repeat = 2, gap = 12 },
+# ]
+# palette = "ui-cyan"
+
+

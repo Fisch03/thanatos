@@ -1,5 +1,6 @@
 /target
 /export
-**/*.sfc
-/test
+/scan_*
 /good_tiles
+
+**/*.sfc

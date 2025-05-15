@@ -20,6 +20,11 @@ pub struct Decompressor<'a> {
     backref_remaining: usize,
 }
 
+pub struct DecompressResult {
+    pub data: Vec<u8>,
+    pub bytes_read: usize,
+}
+
 #[derive(Error, Debug)]
 pub enum DecompressError {
     #[error("Data contained an invalid operation")]
@@ -30,20 +35,22 @@ pub enum DecompressError {
     MaxSizeExceeded,
     #[error("Invalid Data")]
     InvalidData,
+    #[error("Decompressed data didn't match expected layout: {0}")]
+    InvalidLayout(String),
 }
 
 impl Operation {
-    pub fn decode(op: u8, decompressor: &mut Decompressor) -> Self {
+    pub fn decode(op: u8, decompressor: &mut Decompressor) -> Result<Self, DecompressError> {
         match op {
-            n @ 0x00..0x40 => Self::CopySimple(n),
+            n @ 0x00..0x40 => Ok(Self::CopySimple(n)),
 
             n @ 0x40..0x50 => Self::decode_copy_nibble_fixed(n, decompressor),
-            n @ 0x50..0x60 => Self::CopyDoubled(n & 0x0f),
-            n @ 0x60..0x80 => Self::CopyInterleaved {
+            n @ 0x50..0x60 => Ok(Self::CopyDoubled(n & 0x0f)),
+            n @ 0x60..0x80 => Ok(Self::CopyInterleaved {
                 count: (n & 0x0f) + 1,
-                fixed_value: decompressor.read(),
+                fixed_value: decompressor.read()?,
                 fixed_first: n < 0x70,
-            },
+            }),
 
             n @ 0x80..0xc0 => Self::decode_copy_backread_small(n, decompressor),
             n @ 0xc0..0xe0 => Self::decode_copy_backread_large(n, decompressor),
@@ -54,14 +61,17 @@ impl Operation {
             n @ 0xf8..0xfc => Self::decode_backref_large(n, decompressor),
             n @ 0xfc..0xff => Self::decode_backref_small(n, decompressor),
 
-            0xff => Self::Exit,
+            0xff => Ok(Self::Exit),
         }
     }
 
-    fn decode_copy_nibble_fixed(op: u8, decompressor: &mut Decompressor) -> Self {
+    fn decode_copy_nibble_fixed(
+        op: u8,
+        decompressor: &mut Decompressor,
+    ) -> Result<Self, DecompressError> {
         let count = (op & 0x0f) + 1;
 
-        let op_2 = decompressor.read();
+        let op_2 = decompressor.read()?;
 
         let fixed_pos = if (op_2 & 0x10) == 0 {
             NibblePos::Upper
@@ -79,75 +89,93 @@ impl Operation {
             fixed = if (op_2 & 0x40) == 0 { 0x00 } else { 0x0f };
         }
 
-        Self::CopyNibbleFixed {
+        Ok(Self::CopyNibbleFixed {
             count,
             fixed,
             fixed_pos,
             initial,
-        }
+        })
     }
 
-    fn decode_copy_backread_small(op: u8, decompressor: &mut Decompressor) -> Self {
+    fn decode_copy_backread_small(
+        op: u8,
+        decompressor: &mut Decompressor,
+    ) -> Result<Self, DecompressError> {
         let count = (op & 0x7f) / 4 + 1;
 
         let upper = op & 0x03;
-        let lower = decompressor.read_raw();
+        let lower = decompressor.read_raw()?;
         let back = u16::from_be_bytes([upper, lower]);
 
-        Self::CopyBackread { count, back }
+        Ok(Self::CopyBackread { count, back })
     }
-    fn decode_copy_backread_large(op: u8, decompressor: &mut Decompressor) -> Self {
+    fn decode_copy_backread_large(
+        op: u8,
+        decompressor: &mut Decompressor,
+    ) -> Result<Self, DecompressError> {
         let upper = op & 0x1f;
-        let lower = decompressor.read();
+        let lower = decompressor.read()?;
 
         let count = ((upper << 1) | (lower >> 7)) + 1;
-        let back = u16::from_be_bytes([lower & 0x7f, decompressor.read_raw()]);
+        let back = u16::from_be_bytes([lower & 0x7f, decompressor.read_raw()?]);
 
-        Self::CopyBackread { count, back }
+        Ok(Self::CopyBackread { count, back })
     }
 
-    fn decode_repeat_value_small(op: u8, decompressor: &mut Decompressor) -> Self {
+    fn decode_repeat_value_small(
+        op: u8,
+        decompressor: &mut Decompressor,
+    ) -> Result<Self, DecompressError> {
         let count = (op as u16 & 0x07) + 3;
-        let value = decompressor.read_raw();
+        let value = decompressor.read_raw()?;
 
-        Self::RepeatValue { count, value }
+        Ok(Self::RepeatValue { count, value })
     }
-    fn decode_repeat_value_large(op: u8, decompressor: &mut Decompressor) -> Self {
+    fn decode_repeat_value_large(
+        op: u8,
+        decompressor: &mut Decompressor,
+    ) -> Result<Self, DecompressError> {
         let upper = op & 0x0f;
-        let lower = decompressor.read();
+        let lower = decompressor.read()?;
         let count = u16::from_be_bytes([upper, lower]) + 3;
 
-        let value = decompressor.read_raw();
+        let value = decompressor.read_raw()?;
 
-        Self::RepeatValue { count, value }
+        Ok(Self::RepeatValue { count, value })
     }
 
-    fn decode_backref_small(op: u8, decompressor: &mut Decompressor) -> Self {
+    fn decode_backref_small(
+        op: u8,
+        decompressor: &mut Decompressor,
+    ) -> Result<Self, DecompressError> {
         let upper = op & 0x01;
-        let lower = decompressor.read_raw();
+        let lower = decompressor.read_raw()?;
 
         let back = (lower & 0x3f) + 2;
         let count = ((u16::from(upper) << 8) | u16::from(lower)) >> 6;
 
-        Self::StartBackref {
+        Ok(Self::StartBackref {
             count: count + 3,
             back: back as u16,
-        }
+        })
     }
-    fn decode_backref_large(op: u8, decompressor: &mut Decompressor) -> Self {
+    fn decode_backref_large(
+        op: u8,
+        decompressor: &mut Decompressor,
+    ) -> Result<Self, DecompressError> {
         let upper = op & 0x03;
-        let lower = decompressor.read_raw();
+        let lower = decompressor.read_raw()?;
 
         let back_upper = lower & 0x1f;
-        let back_lower = decompressor.read_raw();
+        let back_lower = decompressor.read_raw()?;
         let back = u16::from_be_bytes([back_upper, back_lower]) + 3;
 
         let count = ((u16::from(upper) << 8) | u16::from(lower)) >> 5;
 
-        Self::StartBackref {
+        Ok(Self::StartBackref {
             count: count + 3,
             back: back as u16,
-        }
+        })
     }
 }
 
@@ -167,28 +195,28 @@ impl<'a> Decompressor<'a> {
         }
     }
 
-    pub fn decompress(mut self) -> Result<Vec<u8>, DecompressError> {
+    pub fn decompress(mut self) -> Result<DecompressResult, DecompressError> {
         loop {
-            let value = self.read();
+            let value = self.read()?;
 
-            let operation = Operation::decode(value, &mut self);
-            //dbg!(&operation);
+            let operation = Operation::decode(value, &mut self)?;
+
             log::trace!("operation: {:?}", operation);
 
             match operation {
-                Operation::CopySimple(count) => self.copy_simple(count),
+                Operation::CopySimple(count) => self.copy_simple(count)?,
                 Operation::CopyNibbleFixed {
                     fixed,
                     fixed_pos,
                     count,
                     initial,
-                } => self.copy_nibble_fixed(count, fixed, fixed_pos, initial),
-                Operation::CopyDoubled(count) => self.copy_doubled(count),
+                } => self.copy_nibble_fixed(count, fixed, fixed_pos, initial)?,
+                Operation::CopyDoubled(count) => self.copy_doubled(count)?,
                 Operation::CopyInterleaved {
                     count,
                     fixed_value,
                     fixed_first,
-                } => self.copy_interleaved(count, fixed_value, fixed_first),
+                } => self.copy_interleaved(count, fixed_value, fixed_first)?,
 
                 Operation::CopyBackread { count, back } => {
                     self.copy_backread(count, back)?;
@@ -220,21 +248,28 @@ impl<'a> Decompressor<'a> {
             self.prev_index = self.read_index;
         }
 
-        Ok(self.dst)
+        Ok(DecompressResult {
+            data: self.dst,
+            bytes_read: self.read_index - self.start_index,
+        })
     }
 
-    fn read_raw(&mut self) -> u8 {
+    fn read_raw(&mut self) -> Result<u8, DecompressError> {
         let value = self.src[self.read_index];
         self.read_index += 1;
+
+        if self.read_index >= self.src.len() {
+            return Err(DecompressError::InvalidData);
+        }
 
         if self.read_index == 0 {
             unreachable!("y overflow (unknown subroutine at a149)");
         }
 
-        value
+        Ok(value)
     }
 
-    fn read(&mut self) -> u8 {
+    fn read(&mut self) -> Result<u8, DecompressError> {
         let value = self.read_raw();
         self.check_backref_end();
         value
@@ -258,20 +293,24 @@ impl<'a> Decompressor<'a> {
         }
     }
 
-    fn copy_simple(&mut self, count: u8) {
+    fn copy_simple(&mut self, count: u8) -> Result<(), DecompressError> {
         for _ in 0..=count {
-            let value = self.read();
+            let value = self.read()?;
             self.dst.push(value);
         }
+
+        Ok(())
     }
 
-    fn copy_doubled(&mut self, count: u8) {
+    fn copy_doubled(&mut self, count: u8) -> Result<(), DecompressError> {
         for _ in 0..=count {
-            let value = self.read();
+            let value = self.read()?;
 
             self.dst.push(value);
             self.dst.push(value);
         }
+
+        Ok(())
     }
 
     fn copy_nibble_fixed(
@@ -280,7 +319,7 @@ impl<'a> Decompressor<'a> {
         fixed: u8,
         fixed_pos: NibblePos,
         initial: Option<u8>,
-    ) {
+    ) -> Result<(), DecompressError> {
         if initial.is_some() {
             count += 1;
         }
@@ -291,7 +330,7 @@ impl<'a> Decompressor<'a> {
             let nibble = if let Some(current) = current.take() {
                 current & 0x0f
             } else {
-                let value = self.read();
+                let value = self.read()?;
                 current = Some(value);
                 value >> 4
             };
@@ -303,22 +342,31 @@ impl<'a> Decompressor<'a> {
 
             self.dst.push(value);
         }
+
+        Ok(())
     }
 
-    fn copy_interleaved(&mut self, count: u8, fixed_value: u8, fixed_first: bool) {
+    fn copy_interleaved(
+        &mut self,
+        count: u8,
+        fixed_value: u8,
+        fixed_first: bool,
+    ) -> Result<(), DecompressError> {
         for _ in 0..=count {
             if fixed_first {
                 self.dst.push(fixed_value);
 
-                let read = self.read();
+                let read = self.read()?;
                 self.dst.push(read);
             } else {
-                let read = self.read();
+                let read = self.read()?;
                 self.dst.push(read);
 
                 self.dst.push(fixed_value);
             }
         }
+
+        Ok(())
     }
 
     fn copy_backread(&mut self, count: u8, back: u16) -> Result<(), DecompressError> {

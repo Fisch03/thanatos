@@ -6,11 +6,11 @@ pub trait Compressable {
     where
         Self: Sized,
     {
-        let decompressed = Decompressor::new(data, offset).decompress()?;
-        Self::try_from_slice(&decompressed).ok_or(DecompressError::InvalidData)
+        let result = Decompressor::new(data, offset).decompress()?;
+        Self::try_from_slice(&result.data)
     }
 
-    fn try_from_slice(data: &[u8]) -> Option<Self>
+    fn try_from_slice(data: &[u8]) -> Result<Self, DecompressError>
     where
         Self: Sized;
 }

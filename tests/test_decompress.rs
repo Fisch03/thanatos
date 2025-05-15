@@ -21,7 +21,7 @@ fn test_decompress() -> anyhow::Result<()> {
         let expected = fs::read(entry.path())?;
         let result = thanatos::Decompressor::new(&rom, offset).decompress()?;
 
-        if expected != result {
+        if expected != result.data {
             panic!(
                 "Decompressed data does not match for {} at offset {:#x}",
                 name, offset
